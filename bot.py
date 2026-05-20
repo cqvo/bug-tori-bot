@@ -1,0 +1,82 @@
+import logging
+import os
+import random
+import sys
+from pathlib import Path
+
+import yaml
+from dotenv import load_dotenv
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk.errors import SlackApiError
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+log = logging.getLogger("bug-tori-bot")
+
+
+def load_config(path: Path) -> dict:
+    with path.open() as f:
+        cfg = yaml.safe_load(f)
+    ids = cfg.get("target_user_ids")
+    if not ids or not isinstance(ids, list):
+        sys.exit("config.yaml target_user_ids must be a non-empty list")
+    pct = cfg.get("reaction_percentage")
+    if pct is None or not (0.0 <= float(pct) <= 1.0):
+        sys.exit("config.yaml reaction_percentage must be between 0.0 and 1.0")
+    return cfg
+
+
+def main() -> None:
+    load_dotenv()
+    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    app_token = os.environ.get("SLACK_APP_TOKEN")
+    if not bot_token or not app_token:
+        sys.exit("SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set (see .env.example)")
+
+    cfg = load_config(Path(__file__).parent / "config.yaml")
+    target_user_ids: set[str] = set(cfg["target_user_ids"])
+    reaction_percentage: float = float(cfg["reaction_percentage"])
+
+    app = App(token=bot_token)
+
+    emoji_resp = app.client.emoji_list()
+    custom_emojis: list[str] = list(emoji_resp.get("emoji", {}).keys())
+    if not custom_emojis:
+        sys.exit("workspace has no custom emojis to react with")
+
+    log.info(
+        "targets=%s percentage=%.2f custom_emojis=%d",
+        sorted(target_user_ids), reaction_percentage, len(custom_emojis),
+    )
+
+    @app.event("message")
+    def on_message(event, client, logger):
+        if event.get("subtype") is not None:
+            return
+        if event.get("user") not in target_user_ids:
+            return
+        if random.random() >= reaction_percentage:
+            return
+        emoji = random.choice(custom_emojis)
+        try:
+            client.reactions_add(
+                channel=event["channel"],
+                timestamp=event["ts"],
+                name=emoji,
+            )
+            log.info("reacted with :%s: in %s", emoji, event["channel"])
+        except SlackApiError as e:
+            err = e.response.get("error")
+            if err == "already_reacted":
+                return
+            logger.warning("reactions_add failed: %s", err)
+
+    log.info("starting Socket Mode connection")
+    SocketModeHandler(app, app_token).start()
+
+
+if __name__ == "__main__":
+    main()
