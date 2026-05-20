@@ -52,6 +52,16 @@ def main() -> None:
         sorted(target_user_ids), reaction_percentage, len(custom_emojis),
     )
 
+    def channel_label(channel_id: str) -> str:
+        try:
+            info = client.conversations_info(channel=channel_id)
+            name = info["channel"].get("name")
+            if name:
+                return f"#{name} ({channel_id})"
+        except SlackApiError:
+            pass
+        return channel_id
+
     @app.event("message")
     def on_message(event, client, logger):
         if event.get("subtype") is not None:
@@ -61,18 +71,19 @@ def main() -> None:
         if random.random() >= reaction_percentage:
             return
         emoji = random.choice(custom_emojis)
+        channel_id = event["channel"]
         try:
             client.reactions_add(
-                channel=event["channel"],
+                channel=channel_id,
                 timestamp=event["ts"],
                 name=emoji,
             )
-            log.info("reacted with :%s: in %s", emoji, event["channel"])
+            log.info("reacted with :%s: in %s", emoji, channel_label(channel_id))
         except SlackApiError as e:
             err = e.response.get("error")
             if err == "already_reacted":
                 return
-            logger.warning("reactions_add failed: %s", err)
+            logger.warning("reactions_add failed in %s: %s", channel_label(channel_id), err)
 
     log.info("starting Socket Mode connection")
     SocketModeHandler(app, app_token).start()

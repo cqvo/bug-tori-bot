@@ -19,9 +19,42 @@ The bot only sees messages in channels it has been explicitly invited to. To exp
 
 This assumes the Slack app already exists in your workspace. You'll need two tokens from it:
 
-- **Bot User OAuth Token** (`xoxb-…`) from *OAuth & Permissions*. The app must have these bot scopes: `reactions:write`, `emoji:read`, `channels:history`, `groups:history`, `im:history`, `mpim:history`.
-- **App-Level Token** (`xapp-…`) from *Basic Information → App-Level Tokens* with the `connections:write` scope, and Socket Mode enabled under *Socket Mode*.
-- The app must subscribe to these bot events: `message.channels`, `message.groups`, `message.im`, `message.mpim`.
+- **Bot User OAuth Token** (`xoxb-…`) — copied from *OAuth & Permissions* after installing the app.
+- **App-Level Token** (`xapp-…`) — generated under *Basic Information → App-Level Tokens*. Socket Mode must also be enabled under *Socket Mode*.
+
+#### Required bot scopes
+
+Configured under *OAuth & Permissions → Scopes → Bot Token Scopes*:
+
+| Scope | Why |
+| --- | --- |
+| `reactions:write` | Add emoji reactions to messages. |
+| `emoji:read` | Fetch the workspace's custom emoji list at startup. |
+| `channels:history` | Read messages in public channels the bot is invited to. |
+| `groups:history` | Read messages in private channels the bot is invited to. |
+| `im:history` | Read DMs sent to the bot. |
+| `mpim:history` | Read group DMs the bot is part of. |
+
+#### Required app-level token scope
+
+Configured when generating the `xapp-…` token under *Basic Information → App-Level Tokens*:
+
+| Scope | Why |
+| --- | --- |
+| `connections:write` | Authenticate the Socket Mode WebSocket connection. |
+
+#### Required event subscriptions
+
+Configured under *Event Subscriptions → Subscribe to bot events*:
+
+| Event | Why |
+| --- | --- |
+| `message.channels` | Messages posted in public channels. |
+| `message.groups` | Messages posted in private channels. |
+| `message.im` | Messages sent in DMs with the bot. |
+| `message.mpim` | Messages posted in group DMs. |
+
+If you change scopes after installing the app, you must reinstall it to the workspace and re-copy the bot token.
 
 ### 1. Install dependencies
 
