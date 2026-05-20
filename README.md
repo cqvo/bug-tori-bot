@@ -92,7 +92,7 @@ To find a user's member ID: click their name in Slack → **View full profile** 
 ### 3. Run
 
 ```bash
-python bot.py
+python btb-bot.py
 ```
 
 You should see:
@@ -143,7 +143,7 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 ## Files
 
 ```
-bot.py          # entrypoint
+btb-bot.py      # entrypoint
 config.yaml     # target user, percentage, emoji list
 .env.example    # token template
 pyproject.toml  # deps: slack-bolt, pyyaml, python-dotenv
