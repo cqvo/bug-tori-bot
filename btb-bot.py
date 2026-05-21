@@ -54,7 +54,7 @@ def main() -> None:
 
     def channel_label(channel_id: str) -> str:
         try:
-            info = client.conversations_info(channel=channel_id)
+            info = app.client.conversations_info(channel=channel_id)
             name = info["channel"].get("name")
             if name:
                 return f"#{name} ({channel_id})"
