@@ -47,9 +47,26 @@ def main() -> None:
     if not custom_emojis:
         sys.exit("workspace has no custom emojis to react with")
 
+    def user_label(user_id: str) -> str:
+        try:
+            info = app.client.users_info(user=user_id)
+            user = info["user"]
+            name = (
+                user.get("profile", {}).get("display_name")
+                or user.get("profile", {}).get("real_name")
+                or user.get("real_name")
+                or user.get("name")
+            )
+            if name:
+                return f"{name} ({user_id})"
+        except SlackApiError as e:
+            log.warning("users_info failed for %s: %s", user_id, e.response.get("error"))
+        return user_id
+
+    targets_labeled = [user_label(uid) for uid in sorted(target_user_ids)]
     log.info(
         "targets=%s percentage=%.2f custom_emojis=%d",
-        sorted(target_user_ids), reaction_percentage, len(custom_emojis),
+        targets_labeled, reaction_percentage, len(custom_emojis),
     )
 
     def channel_label(channel_id: str) -> str:
@@ -64,18 +81,32 @@ def main() -> None:
 
     @app.event("message")
     def on_message(event, client, logger):
-        if event.get("subtype") is not None:
+        user = event.get("user")
+        channel_id = event.get("channel")
+        ts = event.get("ts")
+        subtype = event.get("subtype")
+        if subtype is not None:
+            log.info("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
             return
-        if event.get("user") not in target_user_ids:
+        if user not in target_user_ids:
+            log.info("skip ts=%s channel=%s user=%s: not a target", ts, channel_id, user)
             return
-        if random.random() >= reaction_percentage:
+        roll = random.random()
+        if roll >= reaction_percentage:
+            log.info(
+                "skip ts=%s channel=%s user=%s: roll %.3f >= %.3f",
+                ts, channel_id, user, roll, reaction_percentage,
+            )
             return
+        log.info(
+            "react ts=%s channel=%s user=%s: roll %.3f < %.3f",
+            ts, channel_id, user, roll, reaction_percentage,
+        )
         emoji = random.choice(custom_emojis)
-        channel_id = event["channel"]
         try:
             client.reactions_add(
                 channel=channel_id,
-                timestamp=event["ts"],
+                timestamp=ts,
                 name=emoji,
             )
             log.info("reacted with :%s: in %s", emoji, channel_label(channel_id))

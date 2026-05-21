@@ -30,6 +30,7 @@ Configured under *OAuth & Permissions → Scopes → Bot Token Scopes*:
 | --- | --- |
 | `reactions:write` | Add emoji reactions to messages. |
 | `emoji:read` | Fetch the workspace's custom emoji list at startup. |
+| `users:read` | Resolve target user IDs to display names for startup logging. |
 | `channels:history` | Read messages in public channels the bot is invited to. |
 | `groups:history` | Read messages in private channels the bot is invited to. |
 | `im:history` | Read DMs sent to the bot. |
