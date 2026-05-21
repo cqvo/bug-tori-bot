@@ -20,13 +20,19 @@ log = logging.getLogger("bug-tori-bot")
 def load_config(path: Path) -> dict:
     with path.open() as f:
         cfg = yaml.safe_load(f)
-    ids = cfg.get("target_user_ids")
-    if not ids or not isinstance(ids, list):
-        sys.exit("config.yaml target_user_ids must be a non-empty list")
     pct = cfg.get("reaction_percentage")
     if pct is None or not (0.0 <= float(pct) <= 1.0):
         sys.exit("config.yaml reaction_percentage must be between 0.0 and 1.0")
     return cfg
+
+
+def parse_target_user_ids(raw: str | None) -> set[str]:
+    if not raw:
+        sys.exit("TARGET_USER_IDS must be set in .env as a comma-separated list (see .env.example)")
+    ids = {part.strip() for part in raw.split(",") if part.strip()}
+    if not ids:
+        sys.exit("TARGET_USER_IDS must contain at least one Slack member ID")
+    return ids
 
 
 def main() -> None:
@@ -36,8 +42,8 @@ def main() -> None:
     if not bot_token or not app_token:
         sys.exit("SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set (see .env.example)")
 
+    target_user_ids = parse_target_user_ids(os.environ.get("TARGET_USER_IDS"))
     cfg = load_config(Path(__file__).parent / "config.yaml")
-    target_user_ids: set[str] = set(cfg["target_user_ids"])
     reaction_percentage: float = float(cfg["reaction_percentage"])
 
     app = App(token=bot_token)

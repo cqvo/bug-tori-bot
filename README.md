@@ -73,33 +73,34 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` and paste the two tokens:
+Edit `.env` with the two tokens and your target user IDs:
 
 ```
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
+TARGET_USER_IDS=U0985TXQZPF,U0B99GLRL    # comma-separated Slack member IDs
 ```
 
 Then edit `config.yaml`:
 
 ```yaml
-target_user_ids:              # one or more Slack member IDs to watch
-  - U0985TXQZPF
 reaction_percentage: 0.25     # 0.0–1.0; share of their messages to react to
 ```
 
-To find a user's member ID: click their name in Slack → **View full profile** → **⋮** menu → **Copy member ID**. Add as many IDs as you like under `target_user_ids`.
+To find a user's member ID: click their name in Slack → **View full profile** → **⋮** menu → **Copy member ID**. Add as many IDs as you like to `TARGET_USER_IDS`, comma-separated.
 
 ### 3. Run
 
 ```bash
+./start.sh          # activates .venv and runs the bot
+# or, manually:
 python btb-bot.py
 ```
 
 You should see:
 
 ```
-... INFO bug-tori-bot targets=['U0985TXQZPF'] percentage=0.25 custom_emojis=N
+... INFO bug-tori-bot targets=['Some User (U0985TXQZPF)'] percentage=0.25 custom_emojis=N
 ... INFO bug-tori-bot starting Socket Mode connection
 ```
 
@@ -120,12 +121,12 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 | --- | --- | --- |
 | `SLACK_BOT_TOKEN` | yes | `xoxb-…` from *OAuth & Permissions* after installing the app. |
 | `SLACK_APP_TOKEN` | yes | `xapp-…` app-level token with `connections:write` scope. |
+| `TARGET_USER_IDS` | yes | Comma-separated Slack member IDs (e.g. `U0985TXQZPF,U0B99GLRL`). Messages from any user in the list trigger reactions. |
 
 ### `config.yaml`
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `target_user_ids` | list of strings | Slack member IDs (e.g. `U0985TXQZPF`). Messages from any user in the list trigger reactions. |
 | `reaction_percentage` | float | `0.0`–`1.0`. Fraction of qualifying messages to react to, sampled independently per message. |
 
 ## Troubleshooting
@@ -134,7 +135,7 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 
 **Bot starts but doesn't react** — confirm:
 - The bot is a member of the channel (`/invite @bug-tori-bot`).
-- The poster's member ID is in `target_user_ids` (try adding your own ID for a self-test).
+- The poster's member ID is in `TARGET_USER_IDS` (try adding your own ID for a self-test).
 - `reaction_percentage` isn't too low to observe.
 
 **`reaction_percentage must be between 0.0 and 1.0`** — `config.yaml` value is missing, non-numeric, or out of range.
