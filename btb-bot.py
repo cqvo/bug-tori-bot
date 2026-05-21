@@ -91,11 +91,13 @@ def main() -> None:
         channel_id = event.get("channel")
         ts = event.get("ts")
         subtype = event.get("subtype")
-        if subtype is not None:
-            log.info("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
+        channel_type = event.get("channel_type")
+        if channel_type in ("im", "mpim"):
             return
         if user not in target_user_ids:
-            log.info("skip ts=%s channel=%s user=%s: not a target", ts, channel_id, user)
+            return
+        if subtype is not None:
+            log.info("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
             return
         roll = random.random()
         if roll >= reaction_percentage:
