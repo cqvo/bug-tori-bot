@@ -33,8 +33,13 @@ The two rolls are independent — the same message can be both mocked and reacte
 The **custom emoji list is fetched once at startup** via `emoji.list` and cached for the process lifetime — restart to pick up newly added workspace emojis. If the workspace has zero custom emojis, the bot exits at startup rather than running as a no-op.
 
 Config is split across two files on purpose:
-- `.env` — secrets and identifiers we don't commit (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `TARGET_USER_IDS`, optional `BLOCKED_USER_IDS`, both comma-separated lists of Slack member IDs). Gitignored.
+- `.env` — secrets and identifiers we don't commit (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `TARGET_USER_IDS`, optional `BLOCKED_USER_IDS`, both comma-separated lists of Slack member IDs). Also holds the optional `LOG_MODE` operational toggle. Gitignored.
 - `config.yaml` — non-secret behavior (`reaction_percentage`, `mock_percentage`, both floats 0.0–1.0). Validated at startup; bad values call `sys.exit`.
+
+`LOG_MODE` has three values, validated at startup:
+- `normal` (default) — `log.info` fires only when the bot actually acts (`mock …`, `react …`, `reacted with :emoji: …`). Warnings still fire. Skips, roll-misses, and startup config dumps are at `log.debug` and suppressed.
+- `verbose` — sets the `bug-tori-bot` logger to `DEBUG`, exposing all of the above skip/decision/startup lines. Slack SDK loggers stay at their defaults.
+- `debug` — verbose plus `slack_bolt` and `slack_sdk` loggers set to `DEBUG` (raw API request/response noise).
 
 ## Slack app requirements
 

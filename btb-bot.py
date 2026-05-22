@@ -56,6 +56,15 @@ def parse_blocked_user_ids(raw: str | None) -> set[str]:
 
 def main() -> None:
     load_dotenv()
+
+    log_mode = os.environ.get("LOG_MODE", "normal").lower()
+    if log_mode not in ("normal", "verbose", "debug"):
+        sys.exit("LOG_MODE must be one of: normal, verbose, debug")
+    log.setLevel(logging.DEBUG if log_mode in ("verbose", "debug") else logging.INFO)
+    if log_mode == "debug":
+        logging.getLogger("slack_bolt").setLevel(logging.DEBUG)
+        logging.getLogger("slack_sdk").setLevel(logging.DEBUG)
+
     bot_token = os.environ.get("SLACK_BOT_TOKEN")
     app_token = os.environ.get("SLACK_APP_TOKEN")
     if not bot_token or not app_token:
@@ -104,7 +113,7 @@ def main() -> None:
 
     targets_labeled = [user_label(uid) for uid in sorted(target_user_ids)]
     blocked_labeled = [user_label(uid) for uid in sorted(blocked_user_ids)]
-    log.info(
+    log.debug(
         "targets=%s blocked=%s reaction_pct=%.2f mock_pct=%.2f custom_emojis=%d image_upload=%s",
         targets_labeled, blocked_labeled, reaction_percentage, mock_percentage, len(custom_emojis), can_upload_image,
     )
@@ -144,10 +153,10 @@ def main() -> None:
         if channel_type in ("im", "mpim"):
             return
         if subtype is not None:
-            log.info("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
+            log.debug("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
             return
         if event.get("bot_id"):
-            log.info(
+            log.debug(
                 "skip ts=%s channel=%s: bot_id=%s app_id=%s",
                 ts, channel_id, event.get("bot_id"), event.get("app_id"),
             )
@@ -157,9 +166,9 @@ def main() -> None:
 
         text = event.get("text") or ""
         if user in blocked_user_ids:
-            log.info("skip-mock ts=%s channel=%s user=%s: blocked", ts, channel_id, user)
+            log.debug("skip-mock ts=%s channel=%s user=%s: blocked", ts, channel_id, user)
         elif not bot_in_channel(channel_id):
-            log.info("skip-mock ts=%s channel=%s: bot not in channel", ts, channel_id)
+            log.debug("skip-mock ts=%s channel=%s: bot not in channel", ts, channel_id)
         else:
             mock_roll = random.random()
             if mock_roll < mock_percentage and text.strip():
@@ -192,7 +201,7 @@ def main() -> None:
                         channel_label(channel_id), err,
                     )
             else:
-                log.info(
+                log.debug(
                     "skip-mock ts=%s channel=%s user=%s: roll %.3f >= %.3f",
                     ts, channel_id, user, mock_roll, mock_percentage,
                 )
@@ -201,7 +210,7 @@ def main() -> None:
             return
         roll = random.random()
         if roll >= reaction_percentage:
-            log.info(
+            log.debug(
                 "skip ts=%s channel=%s user=%s: roll %.3f >= %.3f",
                 ts, channel_id, user, roll, reaction_percentage,
             )
@@ -224,7 +233,7 @@ def main() -> None:
                 return
             logger.warning("reactions_add failed in %s: %s", channel_label(channel_id), err)
 
-    log.info("starting Socket Mode connection")
+    log.debug("starting Socket Mode connection")
     SocketModeHandler(app, app_token).start()
 
 

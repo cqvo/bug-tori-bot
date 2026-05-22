@@ -107,11 +107,11 @@ To find a user's member ID: click their name in Slack → **View full profile** 
 python btb-bot.py
 ```
 
-You should see:
+By default (`LOG_MODE=normal`) the bot is silent at startup and only logs when it actually mocks or reacts. To see the connection handshake and per-message decisions during setup, run with `LOG_MODE=verbose ./start.sh`:
 
 ```
-... INFO bug-tori-bot targets=['Some User (U0985TXQZPF)'] blocked=[] reaction_pct=0.25 mock_pct=0.10 custom_emojis=N
-... INFO bug-tori-bot starting Socket Mode connection
+... DEBUG bug-tori-bot targets=['Some User (U0985TXQZPF)'] blocked=[] reaction_pct=0.25 mock_pct=0.10 custom_emojis=N image_upload=False
+... DEBUG bug-tori-bot starting Socket Mode connection
 ```
 
 Then `/invite @bug-tori-bot` to any channels you want it active in.
@@ -133,6 +133,7 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 | `SLACK_APP_TOKEN` | yes | `xapp-…` app-level token with `connections:write` scope. |
 | `TARGET_USER_IDS` | yes | Comma-separated Slack member IDs (e.g. `U0985TXQZPF,U0B99GLRL`). Messages from any user in the list are eligible for emoji reactions. |
 | `BLOCKED_USER_IDS` | no | Comma-separated Slack member IDs. Messages from these users are never mock-replied. Empty/unset means mock everyone in invited channels. |
+| `LOG_MODE` | no | `normal` (default), `verbose`, or `debug`. `normal` only logs when the bot actually posts a mock reply or adds a reaction. `verbose` also logs skip/decision/startup lines. `debug` adds Slack SDK request/response logging. |
 
 ### `config.yaml`
 
