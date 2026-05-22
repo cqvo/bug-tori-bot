@@ -20,10 +20,10 @@ Single-file Slack bot (`btb-bot.py`) running over **Socket Mode** — no inbound
 
 The bot has **two independent behaviors**, each sampled separately per message:
 - **Reactions** — gated to a small allowlist (`TARGET_USER_IDS`). On a hit, adds a random workspace custom emoji via `reactions_add`.
-- **Mock replies** — applies to everyone in invited channels *except* `BLOCKED_USER_IDS`. On a hit, posts a threaded `chat_postMessage` reply containing the original text in alternating case plus `:spongebob-mock:`.
+- **Mock replies** — applies to everyone in invited channels *except* `BLOCKED_USER_IDS`. On a hit, posts a threaded reply with the original text in alternating case. If the bot was granted `files:write` and `spongebob-mock.jpg` is present next to the script, it uploads the image via `files_upload_v2` with the alternating-case text as `initial_comment`; otherwise it falls back to `chat_postMessage` with `… :spongebob-mock:` appended. Scope is detected once at startup via `auth.test`'s `x-oauth-scopes` header.
 
 Flow on each event:
-1. Drop DMs (`channel_type` in `("im", "mpim")`) and anything with a `subtype` (edits, joins, file-share, `bot_message`, etc. — only top-level human messages pass). This is also what prevents the bot from mocking itself.
+1. Drop DMs (`channel_type` in `("im", "mpim")`), anything with a `subtype` (edits, joins, file-share, `bot_message`, etc.), and anything with a `bot_id` set (catches modern apps that post without a `subtype`, plus our own posts as a belt-and-suspenders self-mock guard). Only top-level human messages pass.
 2. **Mock branch:** if `event["user"]` is not in `BLOCKED_USER_IDS`, roll `random.random() < mock_percentage`; on hit, post a threaded reply with `alternating_case(text) + " :spongebob-mock:"`.
 3. **Reaction branch:** if `event["user"]` is in `TARGET_USER_IDS`, roll `random.random() < reaction_percentage`; on hit, pick a random custom emoji and call `reactions_add`.
 4. Swallow `already_reacted` errors silently; log any other Slack error with a channel label resolved via `conversations_info`.
@@ -40,7 +40,7 @@ Config is split across two files on purpose:
 
 Changes to scopes or event subscriptions require **reinstalling the app to the workspace** and re-copying the bot token. Required pieces (full table in README.md):
 
-- Bot scopes: `reactions:write`, `chat:write` (mock replies), `emoji:read`, `users:read` (resolves target/blocked IDs to display names at startup), plus `*:history` for whichever channel types the bot should see (`channels`, `groups`, `im`, `mpim`).
+- Bot scopes: `reactions:write`, `chat:write` (mock replies), `emoji:read`, `users:read` (resolves target/blocked IDs to display names at startup), plus `*:history` for whichever channel types the bot should see (`channels`, `groups`, `im`, `mpim`). Optional: `files:write` to upload `spongebob-mock.jpg` as the mock reply instead of emoji text.
 - App-level token scope: `connections:write`.
 - Event subscriptions: `message.channels`, `message.groups`, `message.im`, `message.mpim`.
 - Socket Mode must be enabled in the app config.

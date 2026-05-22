@@ -74,6 +74,18 @@ def main() -> None:
     if not custom_emojis:
         sys.exit("workspace has no custom emojis to react with")
 
+    mock_image_path = Path(__file__).parent / "spongebob-mock.jpg"
+    can_upload_image = False
+    try:
+        auth_resp = app.client.auth_test()
+        scopes_header = auth_resp.headers.get("x-oauth-scopes", "")
+        granted_scopes = {s.strip() for s in scopes_header.split(",") if s.strip()}
+        can_upload_image = "files:write" in granted_scopes and mock_image_path.is_file()
+        if "files:write" in granted_scopes and not mock_image_path.is_file():
+            log.warning("files:write granted but %s not found; falling back to emoji", mock_image_path)
+    except SlackApiError as e:
+        log.warning("auth.test failed: %s", e.response.get("error"))
+
     def user_label(user_id: str) -> str:
         try:
             info = app.client.users_info(user=user_id)
@@ -93,8 +105,8 @@ def main() -> None:
     targets_labeled = [user_label(uid) for uid in sorted(target_user_ids)]
     blocked_labeled = [user_label(uid) for uid in sorted(blocked_user_ids)]
     log.info(
-        "targets=%s blocked=%s reaction_pct=%.2f mock_pct=%.2f custom_emojis=%d",
-        targets_labeled, blocked_labeled, reaction_percentage, mock_percentage, len(custom_emojis),
+        "targets=%s blocked=%s reaction_pct=%.2f mock_pct=%.2f custom_emojis=%d image_upload=%s",
+        targets_labeled, blocked_labeled, reaction_percentage, mock_percentage, len(custom_emojis), can_upload_image,
     )
 
     def channel_label(channel_id: str) -> str:
@@ -134,6 +146,12 @@ def main() -> None:
         if subtype is not None:
             log.info("skip ts=%s channel=%s: subtype=%s", ts, channel_id, subtype)
             return
+        if event.get("bot_id"):
+            log.info(
+                "skip ts=%s channel=%s: bot_id=%s app_id=%s",
+                ts, channel_id, event.get("bot_id"), event.get("app_id"),
+            )
+            return
         if not user:
             return
 
@@ -145,23 +163,32 @@ def main() -> None:
         else:
             mock_roll = random.random()
             if mock_roll < mock_percentage and text.strip():
-                mocked = f"{alternating_case(text)} :spongebob-mock:"
+                mocked_text = alternating_case(text)
                 log.info(
-                    "mock ts=%s channel=%s user=%s: roll %.3f < %.3f",
+                    "mock ts=%s channel=%s user=%s: roll %.3f < %.3f mode=%s",
                     ts, channel_id, user, mock_roll, mock_percentage,
+                    "image" if can_upload_image else "emoji",
                 )
                 try:
-                    client.chat_postMessage(
-                        channel=channel_id,
-                        thread_ts=ts,
-                        text=mocked,
-                    )
+                    if can_upload_image:
+                        client.files_upload_v2(
+                            channel=channel_id,
+                            thread_ts=ts,
+                            file=str(mock_image_path),
+                            initial_comment=mocked_text,
+                        )
+                    else:
+                        client.chat_postMessage(
+                            channel=channel_id,
+                            thread_ts=ts,
+                            text=f"{mocked_text} :spongebob-mock:",
+                        )
                 except SlackApiError as e:
                     err = e.response.get("error")
                     if err == "not_in_channel":
                         channel_member_cache.pop(channel_id, None)
                     logger.warning(
-                        "chat_postMessage failed in %s: %s",
+                        "mock post failed in %s: %s",
                         channel_label(channel_id), err,
                     )
             else:
