@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -39,19 +40,42 @@ def alternating_case(text: str) -> str:
     return "".join(out)
 
 
-def parse_target_user_ids(raw: str | None) -> set[str]:
-    if not raw:
-        sys.exit("TARGET_USER_IDS must be set in .env as a comma-separated list (see .env.example)")
-    ids = {part.strip() for part in raw.split(",") if part.strip()}
-    if not ids:
-        sys.exit("TARGET_USER_IDS must contain at least one Slack member ID")
-    return ids
+USER_ID_RE = re.compile(r"^[UW][A-Z0-9]+$")
+USER_FIELDS = {"name", "mock_percentage", "reaction_percentage"}
 
 
-def parse_blocked_user_ids(raw: str | None) -> set[str]:
-    if not raw:
-        return set()
-    return {part.strip() for part in raw.split(",") if part.strip()}
+def load_users(path: Path) -> dict[str, dict]:
+    if not path.is_file():
+        return {}
+    with path.open() as f:
+        raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        sys.exit(f"{path.name} must be a YAML mapping")
+    users = raw.get("users") or {}
+    if not isinstance(users, dict):
+        sys.exit(f"{path.name} 'users' must be a mapping of user_id -> overrides")
+    result: dict[str, dict] = {}
+    for uid, entry in users.items():
+        if not isinstance(uid, str) or not USER_ID_RE.match(uid):
+            sys.exit(f"{path.name}: '{uid}' is not a valid Slack member ID")
+        if entry is None:
+            entry = {}
+        if not isinstance(entry, dict):
+            sys.exit(f"{path.name}: entry for {uid} must be a mapping")
+        unknown = set(entry) - USER_FIELDS
+        if unknown:
+            sys.exit(f"{path.name}: unknown field(s) for {uid}: {sorted(unknown)}")
+        for key in ("mock_percentage", "reaction_percentage"):
+            if key in entry and entry[key] is not None:
+                try:
+                    val = float(entry[key])
+                except (TypeError, ValueError):
+                    sys.exit(f"{path.name}: {uid}.{key} must be a number in [0.0, 1.0]")
+                if not (0.0 <= val <= 1.0):
+                    sys.exit(f"{path.name}: {uid}.{key} must be between 0.0 and 1.0")
+                entry[key] = val
+        result[uid] = entry
+    return result
 
 
 def main() -> None:
@@ -70,11 +94,19 @@ def main() -> None:
     if not bot_token or not app_token:
         sys.exit("SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set (see .env.example)")
 
-    target_user_ids = parse_target_user_ids(os.environ.get("TARGET_USER_IDS"))
-    blocked_user_ids = parse_blocked_user_ids(os.environ.get("BLOCKED_USER_IDS"))
-    cfg = load_config(Path(__file__).parent / "config.yaml")
+    here = Path(__file__).parent
+    cfg = load_config(here / "config.yaml")
     reaction_percentage: float = float(cfg["reaction_percentage"])
     mock_percentage: float = float(cfg["mock_percentage"])
+    users = load_users(here / "users.yaml")
+
+    def effective_mock_pct(uid: str) -> float:
+        override = users.get(uid, {}).get("mock_percentage")
+        return mock_percentage if override is None else override
+
+    def effective_reaction_pct(uid: str) -> float:
+        override = users.get(uid, {}).get("reaction_percentage")
+        return reaction_percentage if override is None else override
 
     app = App(token=bot_token)
 
@@ -83,7 +115,7 @@ def main() -> None:
     if not custom_emojis:
         sys.exit("workspace has no custom emojis to react with")
 
-    mock_image_path = Path(__file__).parent / "spongebob-mock.jpg"
+    mock_image_path = here / "spongebob-mock.jpg"
     can_upload_image = False
     try:
         auth_resp = app.client.auth_test()
@@ -91,7 +123,10 @@ def main() -> None:
         granted_scopes = {s.strip() for s in scopes_header.split(",") if s.strip()}
         can_upload_image = "files:write" in granted_scopes and mock_image_path.is_file()
         if "files:write" in granted_scopes and not mock_image_path.is_file():
-            log.warning("files:write granted but %s not found; falling back to emoji", mock_image_path)
+            log.warning(
+                "files:write granted but %s not found; falling back to emoji",
+                mock_image_path,
+            )
     except SlackApiError as e:
         log.warning("auth.test failed: %s", e.response.get("error"))
 
@@ -108,15 +143,28 @@ def main() -> None:
             if name:
                 return f"{name} ({user_id})"
         except SlackApiError as e:
-            log.warning("users_info failed for %s: %s", user_id, e.response.get("error"))
+            log.warning(
+                "users_info failed for %s: %s", user_id, e.response.get("error")
+            )
         return user_id
 
-    targets_labeled = [user_label(uid) for uid in sorted(target_user_ids)]
-    blocked_labeled = [user_label(uid) for uid in sorted(blocked_user_ids)]
     log.debug(
-        "targets=%s blocked=%s reaction_pct=%.2f mock_pct=%.2f custom_emojis=%d image_upload=%s",
-        targets_labeled, blocked_labeled, reaction_percentage, mock_percentage, len(custom_emojis), can_upload_image,
+        "reaction_pct=%.2f mock_pct=%.2f users_overridden=%d custom_emojis=%d image_upload=%s",
+        reaction_percentage,
+        mock_percentage,
+        len(users),
+        len(custom_emojis),
+        can_upload_image,
     )
+    for uid in sorted(users):
+        entry = users[uid]
+        log.debug(
+            "  user %s: name=%r mock_pct=%s reaction_pct=%s",
+            user_label(uid),
+            entry.get("name"),
+            entry.get("mock_percentage"),
+            entry.get("reaction_percentage"),
+        )
 
     def channel_label(channel_id: str) -> str:
         try:
@@ -138,8 +186,12 @@ def main() -> None:
             info = app.client.conversations_info(channel=channel_id)
             is_member = bool(info["channel"].get("is_member"))
         except SlackApiError as e:
-            log.warning("conversations_info failed for %s: %s", channel_id, e.response.get("error"))
-            return False
+            log.warning(
+                "conversations_info failed for %s: %s; assuming bot is in channel",
+                channel_id,
+                e.response.get("error"),
+            )
+            is_member = True
         channel_member_cache[channel_id] = is_member
         return is_member
 
@@ -158,24 +210,35 @@ def main() -> None:
         if event.get("bot_id"):
             log.debug(
                 "skip ts=%s channel=%s: bot_id=%s app_id=%s",
-                ts, channel_id, event.get("bot_id"), event.get("app_id"),
+                ts,
+                channel_id,
+                event.get("bot_id"),
+                event.get("app_id"),
             )
             return
         if not user:
             return
+        if not bot_in_channel(channel_id):
+            log.debug("skip ts=%s channel=%s: bot not in channel", ts, channel_id)
+            return
 
         text = event.get("text") or ""
-        if user in blocked_user_ids:
-            log.debug("skip-mock ts=%s channel=%s user=%s: blocked", ts, channel_id, user)
-        elif not bot_in_channel(channel_id):
-            log.debug("skip-mock ts=%s channel=%s: bot not in channel", ts, channel_id)
+        mock_pct = effective_mock_pct(user)
+        if mock_pct == 0.0:
+            log.debug(
+                "skip-mock ts=%s channel=%s user=%s: rate=0", ts, channel_id, user
+            )
         else:
             mock_roll = random.random()
-            if mock_roll < mock_percentage and text.strip():
+            if mock_roll < mock_pct and text.strip():
                 mocked_text = alternating_case(text)
                 log.info(
                     "mock ts=%s channel=%s user=%s: roll %.3f < %.3f mode=%s",
-                    ts, channel_id, user, mock_roll, mock_percentage,
+                    ts,
+                    channel_id,
+                    user,
+                    mock_roll,
+                    mock_pct,
                     "image" if can_upload_image else "emoji",
                 )
                 try:
@@ -190,7 +253,7 @@ def main() -> None:
                         client.chat_postMessage(
                             channel=channel_id,
                             thread_ts=ts,
-                            text=f"{mocked_text} :spongebob-mock:",
+                            text=f":spongebob-mock: {mocked_text} :spongebob-mock:",
                         )
                 except SlackApiError as e:
                     err = e.response.get("error")
@@ -198,26 +261,41 @@ def main() -> None:
                         channel_member_cache.pop(channel_id, None)
                     logger.warning(
                         "mock post failed in %s: %s",
-                        channel_label(channel_id), err,
+                        channel_label(channel_id),
+                        err,
                     )
             else:
                 log.debug(
                     "skip-mock ts=%s channel=%s user=%s: roll %.3f >= %.3f",
-                    ts, channel_id, user, mock_roll, mock_percentage,
+                    ts,
+                    channel_id,
+                    user,
+                    mock_roll,
+                    mock_pct,
                 )
 
-        if user not in target_user_ids:
+        reaction_pct = effective_reaction_pct(user)
+        if reaction_pct == 0.0:
+            log.debug("skip ts=%s channel=%s user=%s: rate=0", ts, channel_id, user)
             return
         roll = random.random()
-        if roll >= reaction_percentage:
+        if roll >= reaction_pct:
             log.debug(
                 "skip ts=%s channel=%s user=%s: roll %.3f >= %.3f",
-                ts, channel_id, user, roll, reaction_percentage,
+                ts,
+                channel_id,
+                user,
+                roll,
+                reaction_pct,
             )
             return
         log.info(
             "react ts=%s channel=%s user=%s: roll %.3f < %.3f",
-            ts, channel_id, user, roll, reaction_percentage,
+            ts,
+            channel_id,
+            user,
+            roll,
+            reaction_pct,
         )
         emoji = random.choice(custom_emojis)
         try:
@@ -231,7 +309,9 @@ def main() -> None:
             err = e.response.get("error")
             if err == "already_reacted":
                 return
-            logger.warning("reactions_add failed in %s: %s", channel_label(channel_id), err)
+            logger.warning(
+                "reactions_add failed in %s: %s", channel_label(channel_id), err
+            )
 
     log.debug("starting Socket Mode connection")
     SocketModeHandler(app, app_token).start()

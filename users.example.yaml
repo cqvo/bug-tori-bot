@@ -1,0 +1,16 @@
+# Per-user overrides. Any user not listed here is mocked AND reacted to at the
+# global defaults in config.yaml. Both fields are optional; omit a field to
+# fall back to the global default. Use 0.0 to opt a user out of that behavior.
+#
+# To find a user's member ID in Slack: click their name -> "View full profile"
+# -> the "..." menu -> "Copy member ID".
+#
+# Copy this file to users.yaml (gitignored) and edit there.
+
+users:
+  U0123456789:
+    name: Example Target
+    reaction_percentage: 1.0
+  U0987654321:
+    name: Example Friend
+    mock_percentage: 0.0

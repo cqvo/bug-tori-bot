@@ -2,8 +2,10 @@
 
 A small Slack bot with two independent behaviors:
 
-- **Reactions** — randomly reacts to messages from one or more *target* users with a random custom emoji from the workspace.
-- **Mock replies** — randomly replies in-thread to messages from *anyone* in invited channels (minus an optional blocklist) with the original text in alternating case plus `:spongebob-mock:`.
+- **Reactions** — randomly reacts to messages with a random custom emoji from the workspace.
+- **Mock replies** — randomly replies in-thread with the original text in alternating case plus `:spongebob-mock:` (or attaches `spongebob-mock.jpg` when the bot has `files:write`).
+
+Both behaviors fire by default for every human in invited channels at the global rates in `config.yaml`. Per-user overrides in `users.yaml` (gitignored) can raise or lower an individual's rate, or set it to `0.0` to opt them out entirely.
 
 Each behavior has its own independent sampling rate. The same message can trigger both, one, or neither.
 
@@ -15,9 +17,9 @@ Runs locally as a long-running Python process over Slack Socket Mode — no publ
 - Subscribes to `message.*` events in every channel the bot has been invited to.
 - On startup, fetches the workspace's custom emoji list via `emoji.list`.
 - For each new top-level message in a public/private channel:
-  - **Mock branch:** if the author is *not* in `BLOCKED_USER_IDS`, rolls against `mock_percentage`. On a hit, posts a threaded reply: `aLtErNaTiNg cAsE :spongebob-mock:`.
-  - **Reaction branch:** if the author is in `TARGET_USER_IDS`, rolls against `reaction_percentage`. On a hit, picks one custom emoji at random and adds it as a reaction.
-- Skips DMs/group DMs, edits, joins, and other message subtypes. Swallows `already_reacted` from Slack.
+  - **Mock branch:** rolls against the author's effective `mock_percentage` (override from `users.yaml`, else the global default). A 0.0 rate skips. On a hit, posts a threaded reply: `aLtErNaTiNg cAsE :spongebob-mock:` (or uploads `spongebob-mock.jpg` if `files:write` is granted).
+  - **Reaction branch:** rolls against the author's effective `reaction_percentage`. A 0.0 rate skips. On a hit, picks one custom emoji at random and adds it as a reaction.
+- Skips DMs/group DMs, edits, joins, other message subtypes, and anything with a `bot_id` (catches messages from other installed apps and our own posts). Swallows `already_reacted` from Slack.
 - The custom emoji list is fetched once at startup. Restart the bot to pick up newly added workspace emojis.
 
 The bot only sees messages in channels it has been explicitly invited to. To expand its reach, `/invite @bug-tori-bot` in more channels.
@@ -38,7 +40,8 @@ Configured under *OAuth & Permissions → Scopes → Bot Token Scopes*:
 | `reactions:write` | Add emoji reactions to messages. |
 | `chat:write` | Post threaded mock replies. |
 | `emoji:read` | Fetch the workspace's custom emoji list at startup. |
-| `users:read` | Resolve target/blocked user IDs to display names for startup logging. |
+| `users:read` | Resolve overridden user IDs to display names for startup logging. |
+| `files:write` (optional) | Upload `spongebob-mock.jpg` as the mock reply instead of emoji text. |
 | `channels:history` | Read messages in public channels the bot is invited to. |
 | `groups:history` | Read messages in private channels the bot is invited to. |
 | `im:history` | Read DMs sent to the bot. |
@@ -79,25 +82,36 @@ pip install -e .
 
 ```bash
 cp .env.example .env
+cp users.example.yaml users.yaml
 ```
 
-Edit `.env` with the two tokens and your target user IDs:
+Edit `.env` with the two tokens:
 
 ```
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-TARGET_USER_IDS=U0985TXQZPF,U0B99GLRL    # comma-separated Slack member IDs — eligible for reactions
-BLOCKED_USER_IDS=                         # optional; comma-separated. These users are never mock-replied. Leave blank to mock everyone in invited channels.
 ```
 
-Then edit `config.yaml`:
+Then edit `config.yaml` for global default rates that apply to **every** human in invited channels:
 
 ```yaml
-reaction_percentage: 0.25     # 0.0–1.0; share of target users' messages to react to
-mock_percentage: 0.1          # 0.0–1.0; share of non-blocked users' messages to mock-reply to
+reaction_percentage: 0.25     # 0.0–1.0; share of all users' messages to react to
+mock_percentage: 0.1          # 0.0–1.0; share of all users' messages to mock-reply to
 ```
 
-To find a user's member ID: click their name in Slack → **View full profile** → **⋮** menu → **Copy member ID**. Add as many IDs as you like to either list, comma-separated.
+Then edit `users.yaml` (gitignored) for per-user overrides. Either field is optional; `0.0` opts that user out of that behavior entirely:
+
+```yaml
+users:
+  U0985TXQZPF:
+    name: Some User              # optional; only used in startup logs
+    reaction_percentage: 1.0     # always react to this user
+  U08SBTJ9N1W:
+    name: Friend
+    mock_percentage: 0.0         # never mock this user
+```
+
+To find a user's member ID: click their name in Slack → **View full profile** → **⋮** menu → **Copy member ID**.
 
 ### 3. Run
 
@@ -110,7 +124,7 @@ python btb-bot.py
 By default (`LOG_MODE=normal`) the bot is silent at startup and only logs when it actually mocks or reacts. To see the connection handshake and per-message decisions during setup, run with `LOG_MODE=verbose ./start.sh`:
 
 ```
-... DEBUG bug-tori-bot targets=['Some User (U0985TXQZPF)'] blocked=[] reaction_pct=0.25 mock_pct=0.10 custom_emojis=N image_upload=False
+... DEBUG bug-tori-bot reaction_pct=0.25 mock_pct=0.10 users_overridden=2 custom_emojis=N image_upload=False
 ... DEBUG bug-tori-bot starting Socket Mode connection
 ```
 
@@ -119,9 +133,10 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 ## Verifying it works
 
 1. Temporarily set both `reaction_percentage: 1.0` and `mock_percentage: 1.0` in `config.yaml` and restart.
-2. From any account whose ID is in `TARGET_USER_IDS`, post a message in an invited channel. The bot should react within ~1 second with a random custom emoji *and* post a mock reply in-thread.
-3. From an account that's *not* in `BLOCKED_USER_IDS` (and not in `TARGET_USER_IDS`), post a message. You should get only the mock reply, no reaction.
-4. Lower the percentages to your real target values and restart.
+2. From any account *not* listed in `users.yaml`, post a message in an invited channel. The bot should react within ~1 second with a random custom emoji *and* post a mock reply in-thread.
+3. From an account listed with `mock_percentage: 0.0`, post a message. You should get only the reaction, no mock reply.
+4. From an account listed with `reaction_percentage: 0.0`, post a message. You should get only the mock reply, no reaction.
+5. Lower the percentages to your real target values and restart.
 
 ## Configuration reference
 
@@ -131,16 +146,26 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 | --- | --- | --- |
 | `SLACK_BOT_TOKEN` | yes | `xoxb-…` from *OAuth & Permissions* after installing the app. |
 | `SLACK_APP_TOKEN` | yes | `xapp-…` app-level token with `connections:write` scope. |
-| `TARGET_USER_IDS` | yes | Comma-separated Slack member IDs (e.g. `U0985TXQZPF,U0B99GLRL`). Messages from any user in the list are eligible for emoji reactions. |
-| `BLOCKED_USER_IDS` | no | Comma-separated Slack member IDs. Messages from these users are never mock-replied. Empty/unset means mock everyone in invited channels. |
 | `LOG_MODE` | no | `normal` (default), `verbose`, or `debug`. `normal` only logs when the bot actually posts a mock reply or adds a reaction. `verbose` also logs skip/decision/startup lines. `debug` adds Slack SDK request/response logging. |
 
 ### `config.yaml`
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `reaction_percentage` | float | `0.0`–`1.0`. Fraction of qualifying messages from `TARGET_USER_IDS` to react to, sampled independently per message. |
-| `mock_percentage` | float | `0.0`–`1.0`. Fraction of qualifying messages from non-blocked users to mock-reply to, sampled independently per message. |
+| `reaction_percentage` | float | `0.0`–`1.0`. Default fraction of all users' messages to react to, sampled independently per message. Overridable per user in `users.yaml`. |
+| `mock_percentage` | float | `0.0`–`1.0`. Default fraction of all users' messages to mock-reply to, sampled independently per message. Overridable per user in `users.yaml`. |
+
+### `users.yaml` (gitignored; copy from `users.example.yaml`)
+
+Top-level key `users:` maps Slack member ID → entry. Each entry takes:
+
+| Key | Type | Description |
+| --- | --- | --- |
+| `name` | string | Optional, cosmetic. Shown in startup logs alongside the Slack-resolved display name. |
+| `mock_percentage` | float | Optional override of the global `mock_percentage` for this user. `0.0` opts them out of mock replies entirely. |
+| `reaction_percentage` | float | Optional override of the global `reaction_percentage` for this user. `0.0` opts them out of reactions entirely. |
+
+Users not listed in `users.yaml` get the global defaults for both behaviors.
 
 ## Troubleshooting
 
@@ -148,13 +173,13 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 
 **Bot starts but doesn't react** — confirm:
 - The bot is a member of the channel (`/invite @bug-tori-bot`).
-- The poster's member ID is in `TARGET_USER_IDS` (try adding your own ID for a self-test).
-- `reaction_percentage` isn't too low to observe.
+- The poster doesn't have `reaction_percentage: 0.0` in `users.yaml`.
+- `reaction_percentage` in `config.yaml` isn't too low to observe.
 
 **Bot starts but doesn't mock-reply** — confirm:
 - The bot is a member of the channel (`/invite @bug-tori-bot`).
-- The poster's member ID is *not* in `BLOCKED_USER_IDS`.
-- `mock_percentage` isn't too low to observe.
+- The poster doesn't have `mock_percentage: 0.0` in `users.yaml`.
+- `mock_percentage` in `config.yaml` isn't too low to observe.
 - The app has the `chat:write` bot scope (added after the initial install — you must reinstall).
 
 **`reaction_percentage must be between 0.0 and 1.0`** / **`mock_percentage must be between 0.0 and 1.0`** — `config.yaml` value is missing, non-numeric, or out of range.
@@ -164,8 +189,9 @@ Then `/invite @bug-tori-bot` to any channels you want it active in.
 ## Files
 
 ```
-btb-bot.py      # entrypoint
-config.yaml     # reaction_percentage, mock_percentage
-.env.example    # token + target/blocked user ID template
-pyproject.toml  # deps: slack-bolt, pyyaml, python-dotenv
+btb-bot.py            # entrypoint
+config.yaml           # global reaction_percentage, mock_percentage
+users.example.yaml    # per-user override template; copy to users.yaml (gitignored)
+.env.example          # token template
+pyproject.toml        # deps: slack-bolt, pyyaml, python-dotenv
 ```

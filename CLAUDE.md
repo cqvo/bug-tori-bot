@@ -19,22 +19,25 @@ Python 3.11+. There is no test suite, linter, or build step configured.
 Single-file Slack bot (`btb-bot.py`) running over **Socket Mode** — no inbound HTTP, no public URL. Connects out to Slack with a bot token (`xoxb-…`) plus an app-level token (`xapp-…`) and listens for `message` events.
 
 The bot has **two independent behaviors**, each sampled separately per message:
-- **Reactions** — gated to a small allowlist (`TARGET_USER_IDS`). On a hit, adds a random workspace custom emoji via `reactions_add`.
-- **Mock replies** — applies to everyone in invited channels *except* `BLOCKED_USER_IDS`. On a hit, posts a threaded reply with the original text in alternating case. If the bot was granted `files:write` and `spongebob-mock.jpg` is present next to the script, it uploads the image via `files_upload_v2` with the alternating-case text as `initial_comment`; otherwise it falls back to `chat_postMessage` with `… :spongebob-mock:` appended. Scope is detected once at startup via `auth.test`'s `x-oauth-scopes` header.
+- **Reactions** — every human in an invited channel is eligible by default (opt-out via `users.yaml`). On a hit, adds a random workspace custom emoji via `reactions_add`.
+- **Mock replies** — every human in an invited channel is eligible by default. On a hit, posts a threaded reply with the original text in alternating case. If the bot was granted `files:write` and `spongebob-mock.jpg` is present next to the script, it uploads the image via `files_upload_v2` with the alternating-case text as `initial_comment`; otherwise it falls back to `chat_postMessage` with `… :spongebob-mock:` appended. Scope is detected once at startup via `auth.test`'s `x-oauth-scopes` header.
+
+Per-user rate overrides live in `users.yaml` (see Config section). Effective rate per user per behavior = the user's override if set, else the global default from `config.yaml`. A rate of `0.0` opts that user out of the behavior.
 
 Flow on each event:
 1. Drop DMs (`channel_type` in `("im", "mpim")`), anything with a `subtype` (edits, joins, file-share, `bot_message`, etc.), and anything with a `bot_id` set (catches modern apps that post without a `subtype`, plus our own posts as a belt-and-suspenders self-mock guard). Only top-level human messages pass.
-2. **Mock branch:** if `event["user"]` is not in `BLOCKED_USER_IDS`, roll `random.random() < mock_percentage`; on hit, post a threaded reply with `alternating_case(text) + " :spongebob-mock:"`.
-3. **Reaction branch:** if `event["user"]` is in `TARGET_USER_IDS`, roll `random.random() < reaction_percentage`; on hit, pick a random custom emoji and call `reactions_add`.
+2. **Mock branch:** compute `effective_mock_pct(user)`. If 0, skip. Otherwise roll `random.random() < pct`; on hit, post a threaded reply with `alternating_case(text)` (with image or `:spongebob-mock:` per scope).
+3. **Reaction branch:** compute `effective_reaction_pct(user)`. If 0, skip. Otherwise roll `random.random() < pct`; on hit, pick a random custom emoji and call `reactions_add`.
 4. Swallow `already_reacted` errors silently; log any other Slack error with a channel label resolved via `conversations_info`.
 
 The two rolls are independent — the same message can be both mocked and reacted to, or neither.
 
 The **custom emoji list is fetched once at startup** via `emoji.list` and cached for the process lifetime — restart to pick up newly added workspace emojis. If the workspace has zero custom emojis, the bot exits at startup rather than running as a no-op.
 
-Config is split across two files on purpose:
-- `.env` — secrets and identifiers we don't commit (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `TARGET_USER_IDS`, optional `BLOCKED_USER_IDS`, both comma-separated lists of Slack member IDs). Also holds the optional `LOG_MODE` operational toggle. Gitignored.
-- `config.yaml` — non-secret behavior (`reaction_percentage`, `mock_percentage`, both floats 0.0–1.0). Validated at startup; bad values call `sys.exit`.
+Config is split across three files on purpose:
+- `.env` — secrets and the optional `LOG_MODE` operational toggle (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `LOG_MODE`). Gitignored.
+- `config.yaml` — non-secret global defaults (`reaction_percentage`, `mock_percentage`, both floats 0.0–1.0). Committed. Validated at startup; bad values call `sys.exit`.
+- `users.yaml` — per-user overrides (`name`, `mock_percentage`, `reaction_percentage` keyed by Slack member ID). Gitignored. Missing file is fine and means "no overrides" (everyone gets the global defaults). `users.example.yaml` documents the schema and is committed. Validated at startup: unknown fields, malformed IDs (must match `^[UW][A-Z0-9]+$`), and out-of-range percentages all `sys.exit`.
 
 `LOG_MODE` has three values, validated at startup:
 - `normal` (default) — `log.info` fires only when the bot actually acts (`mock …`, `react …`, `reacted with :emoji: …`). Warnings still fire. Skips, roll-misses, and startup config dumps are at `log.debug` and suppressed.
@@ -45,7 +48,7 @@ Config is split across two files on purpose:
 
 Changes to scopes or event subscriptions require **reinstalling the app to the workspace** and re-copying the bot token. Required pieces (full table in README.md):
 
-- Bot scopes: `reactions:write`, `chat:write` (mock replies), `emoji:read`, `users:read` (resolves target/blocked IDs to display names at startup), plus `*:history` for whichever channel types the bot should see (`channels`, `groups`, `im`, `mpim`). Optional: `files:write` to upload `spongebob-mock.jpg` as the mock reply instead of emoji text.
+- Bot scopes: `reactions:write`, `chat:write` (mock replies), `emoji:read`, `users:read` (resolves overridden user IDs to display names in startup logs), plus `*:history` for whichever channel types the bot should see (`channels`, `groups`, `im`, `mpim`). Optional: `files:write` to upload `spongebob-mock.jpg` as the mock reply instead of emoji text.
 - App-level token scope: `connections:write`.
 - Event subscriptions: `message.channels`, `message.groups`, `message.im`, `message.mpim`.
 - Socket Mode must be enabled in the app config.
