@@ -43,6 +43,9 @@ def alternating_case(text: str) -> str:
 USER_ID_RE = re.compile(r"^[UW][A-Z0-9]+$")
 USER_FIELDS = {"name", "mock_percentage", "reaction_percentage"}
 
+# Slack encodes user mentions as <@U012ABC> or <@U012ABC|label> in message text.
+MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)(?:\|([^>]+))?>")
+
 
 def load_users(path: Path) -> dict[str, dict]:
     if not path.is_file():
@@ -130,7 +133,13 @@ def main() -> None:
     except SlackApiError as e:
         log.warning("auth.test failed: %s", e.response.get("error"))
 
-    def user_label(user_id: str) -> str:
+    user_name_cache: dict[str, str] = {}
+
+    def display_name(user_id: str) -> str:
+        cached = user_name_cache.get(user_id)
+        if cached is not None:
+            return cached
+        name = user_id
         try:
             info = app.client.users_info(user=user_id)
             user = info["user"]
@@ -139,14 +148,27 @@ def main() -> None:
                 or user.get("profile", {}).get("real_name")
                 or user.get("real_name")
                 or user.get("name")
+                or user_id
             )
-            if name:
-                return f"{name} ({user_id})"
         except SlackApiError as e:
             log.warning(
                 "users_info failed for %s: %s", user_id, e.response.get("error")
             )
-        return user_id
+        user_name_cache[user_id] = name
+        return name
+
+    def user_label(user_id: str) -> str:
+        name = display_name(user_id)
+        return f"{name} ({user_id})" if name != user_id else user_id
+
+    def render_mentions(text: str) -> str:
+        # Turn <@U…> mentions into literal "@name" text so the mock reply
+        # neither pings the target nor echoes a broken, lower-cased user ID.
+        def repl(m: re.Match) -> str:
+            label = m.group(2)
+            return f"@{label}" if label else f"@{display_name(m.group(1))}"
+
+        return MENTION_RE.sub(repl, text)
 
     log.debug(
         "reaction_pct=%.2f mock_pct=%.2f users_overridden=%d custom_emojis=%d image_upload=%s",
@@ -231,7 +253,7 @@ def main() -> None:
         else:
             mock_roll = random.random()
             if mock_roll < mock_pct and text.strip():
-                mocked_text = alternating_case(text)
+                mocked_text = alternating_case(render_mentions(text))
                 log.info(
                     "mock ts=%s channel=%s user=%s: roll %.3f < %.3f mode=%s",
                     ts,
