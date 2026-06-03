@@ -1,6 +1,10 @@
-# Per-user overrides. Any user not listed here is mocked AND reacted to at the
-# global defaults in config.yaml. Both fields are optional; omit a field to
-# fall back to the global default. Use 0.0 to opt a user out of that behavior.
+# Per-user overrides. Any user not listed here is mocked, reacted to, AND
+# offered the give-up image at the global defaults in config.yaml. Every
+# percentage field is optional; omit one to fall back to the global default.
+# Use 0.0 to opt a user out of that behavior.
+#
+# giveup_percentage only takes effect on messages containing a "?", and only
+# when the bot has the files:write scope plus just-give-up.jpg next to it.
 #
 # To find a user's member ID in Slack: click their name -> "View full profile"
 # -> the "..." menu -> "Copy member ID".
@@ -11,6 +15,8 @@ users:
   U0123456789:
     name: Example Target
     reaction_percentage: 1.0
+    giveup_percentage: 1.0  # always send just-give-up.jpg on "?" messages
   U0987654321:
     name: Example Friend
     mock_percentage: 0.0
+    giveup_percentage: 0.0  # never send the give-up image

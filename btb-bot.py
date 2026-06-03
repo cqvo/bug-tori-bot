@@ -21,7 +21,7 @@ log = logging.getLogger("bug-tori-bot")
 def load_config(path: Path) -> dict:
     with path.open() as f:
         cfg = yaml.safe_load(f)
-    for key in ("reaction_percentage", "mock_percentage"):
+    for key in ("reaction_percentage", "mock_percentage", "giveup_percentage"):
         val = cfg.get(key)
         if val is None or not (0.0 <= float(val) <= 1.0):
             sys.exit(f"config.yaml {key} must be between 0.0 and 1.0")
@@ -41,7 +41,7 @@ def alternating_case(text: str) -> str:
 
 
 USER_ID_RE = re.compile(r"^[UW][A-Z0-9]+$")
-USER_FIELDS = {"name", "mock_percentage", "reaction_percentage"}
+USER_FIELDS = {"name", "mock_percentage", "reaction_percentage", "giveup_percentage"}
 
 # Slack encodes user mentions as <@U012ABC> or <@U012ABC|label> in message text.
 MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)(?:\|([^>]+))?>")
@@ -68,7 +68,7 @@ def load_users(path: Path) -> dict[str, dict]:
         unknown = set(entry) - USER_FIELDS
         if unknown:
             sys.exit(f"{path.name}: unknown field(s) for {uid}: {sorted(unknown)}")
-        for key in ("mock_percentage", "reaction_percentage"):
+        for key in ("mock_percentage", "reaction_percentage", "giveup_percentage"):
             if key in entry and entry[key] is not None:
                 try:
                     val = float(entry[key])
@@ -101,6 +101,7 @@ def main() -> None:
     cfg = load_config(here / "config.yaml")
     reaction_percentage: float = float(cfg["reaction_percentage"])
     mock_percentage: float = float(cfg["mock_percentage"])
+    giveup_percentage: float = float(cfg["giveup_percentage"])
     users = load_users(here / "users.yaml")
 
     def effective_mock_pct(uid: str) -> float:
@@ -111,6 +112,10 @@ def main() -> None:
         override = users.get(uid, {}).get("reaction_percentage")
         return reaction_percentage if override is None else override
 
+    def effective_giveup_pct(uid: str) -> float:
+        override = users.get(uid, {}).get("giveup_percentage")
+        return giveup_percentage if override is None else override
+
     app = App(token=bot_token)
 
     emoji_resp = app.client.emoji_list()
@@ -119,16 +124,25 @@ def main() -> None:
         sys.exit("workspace has no custom emojis to react with")
 
     mock_image_path = here / "spongebob-mock.jpg"
+    giveup_image_path = here / "just-give-up.jpg"
     can_upload_image = False
+    can_giveup = False
     try:
         auth_resp = app.client.auth_test()
         scopes_header = auth_resp.headers.get("x-oauth-scopes", "")
         granted_scopes = {s.strip() for s in scopes_header.split(",") if s.strip()}
-        can_upload_image = "files:write" in granted_scopes and mock_image_path.is_file()
-        if "files:write" in granted_scopes and not mock_image_path.is_file():
+        has_files_write = "files:write" in granted_scopes
+        can_upload_image = has_files_write and mock_image_path.is_file()
+        can_giveup = has_files_write and giveup_image_path.is_file()
+        if has_files_write and not mock_image_path.is_file():
             log.warning(
                 "files:write granted but %s not found; falling back to emoji",
                 mock_image_path,
+            )
+        if has_files_write and not giveup_image_path.is_file():
+            log.warning(
+                "files:write granted but %s not found; give-up replies disabled",
+                giveup_image_path,
             )
     except SlackApiError as e:
         log.warning("auth.test failed: %s", e.response.get("error"))
@@ -171,21 +185,25 @@ def main() -> None:
         return MENTION_RE.sub(repl, text)
 
     log.debug(
-        "reaction_pct=%.2f mock_pct=%.2f users_overridden=%d custom_emojis=%d image_upload=%s",
+        "reaction_pct=%.2f mock_pct=%.2f giveup_pct=%.2f users_overridden=%d "
+        "custom_emojis=%d image_upload=%s giveup=%s",
         reaction_percentage,
         mock_percentage,
+        giveup_percentage,
         len(users),
         len(custom_emojis),
         can_upload_image,
+        can_giveup,
     )
     for uid in sorted(users):
         entry = users[uid]
         log.debug(
-            "  user %s: name=%r mock_pct=%s reaction_pct=%s",
+            "  user %s: name=%r mock_pct=%s reaction_pct=%s giveup_pct=%s",
             user_label(uid),
             entry.get("name"),
             entry.get("mock_percentage"),
             entry.get("reaction_percentage"),
+            entry.get("giveup_percentage"),
         )
 
     def channel_label(channel_id: str) -> str:
@@ -294,6 +312,61 @@ def main() -> None:
                     user,
                     mock_roll,
                     mock_pct,
+                )
+
+        giveup_pct = effective_giveup_pct(user)
+        if not can_giveup:
+            log.debug(
+                "skip-giveup ts=%s channel=%s user=%s: disabled (no files:write or image)",
+                ts,
+                channel_id,
+                user,
+            )
+        elif giveup_pct == 0.0:
+            log.debug(
+                "skip-giveup ts=%s channel=%s user=%s: rate=0", ts, channel_id, user
+            )
+        elif "?" not in text:
+            log.debug(
+                "skip-giveup ts=%s channel=%s user=%s: no '?' in text",
+                ts,
+                channel_id,
+                user,
+            )
+        else:
+            giveup_roll = random.random()
+            if giveup_roll < giveup_pct:
+                log.info(
+                    "giveup ts=%s channel=%s user=%s: roll %.3f < %.3f",
+                    ts,
+                    channel_id,
+                    user,
+                    giveup_roll,
+                    giveup_pct,
+                )
+                try:
+                    client.files_upload_v2(
+                        channel=channel_id,
+                        thread_ts=ts,
+                        file=str(giveup_image_path),
+                    )
+                except SlackApiError as e:
+                    err = e.response.get("error")
+                    if err == "not_in_channel":
+                        channel_member_cache.pop(channel_id, None)
+                    logger.warning(
+                        "giveup post failed in %s: %s",
+                        channel_label(channel_id),
+                        err,
+                    )
+            else:
+                log.debug(
+                    "skip-giveup ts=%s channel=%s user=%s: roll %.3f >= %.3f",
+                    ts,
+                    channel_id,
+                    user,
+                    giveup_roll,
+                    giveup_pct,
                 )
 
         reaction_pct = effective_reaction_pct(user)
