@@ -40,6 +40,19 @@ def alternating_case(text: str) -> str:
     return "".join(out)
 
 
+# A "sentence" is a run of text ending in ., !, or ? (or the trailing remainder
+# with no terminal punctuation). Original spacing between sentences is kept.
+SENTENCE_RE = re.compile(r"[^.!?]*[.!?]+|[^.!?]+")
+
+
+def last_sentences(text: str, count: int) -> str:
+    """Return the last `count` sentences of `text` (all of it if there are fewer)."""
+    sentences = [s for s in SENTENCE_RE.findall(text) if s.strip()]
+    if not sentences:
+        return text.strip()
+    return "".join(sentences[-count:]).strip()
+
+
 USER_ID_RE = re.compile(r"^[UW][A-Z0-9]+$")
 USER_FIELDS = {"name", "mock_percentage", "reaction_percentage", "giveup_percentage"}
 
@@ -271,7 +284,8 @@ def main() -> None:
         else:
             mock_roll = random.random()
             if mock_roll < mock_pct and text.strip():
-                mocked_text = alternating_case(render_mentions(text))
+                excerpt = last_sentences(render_mentions(text), random.randint(1, 3))
+                mocked_text = alternating_case(excerpt)
                 log.info(
                     "mock ts=%s channel=%s user=%s: roll %.3f < %.3f mode=%s",
                     ts,

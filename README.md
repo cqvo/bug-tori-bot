@@ -3,7 +3,7 @@
 A small Slack bot with three independent behaviors:
 
 - **Reactions** — randomly reacts to messages with a random custom emoji from the workspace.
-- **Mock replies** — randomly replies in-thread with the original text in alternating case plus `:spongebob-mock:` (or attaches `spongebob-mock.jpg` when the bot has `files:write`).
+- **Mock replies** — randomly replies in-thread with the last 1–3 sentences of the message in alternating case plus `:spongebob-mock:` (or attaches `spongebob-mock.jpg` when the bot has `files:write`).
 - **Give-up replies** — when a message ends in a `?`, randomly replies in-thread by uploading `just-give-up.jpg`. Requires the `files:write` scope and the image file; otherwise this behavior is disabled.
 
 All three behaviors fire by default for every human in invited channels at the global rates in `config.yaml`. Per-user overrides in `users.yaml` (gitignored) can raise or lower an individual's rate, or set it to `0.0` to opt them out entirely.
@@ -18,7 +18,7 @@ Runs locally as a long-running Python process over Slack Socket Mode — no publ
 - Subscribes to `message.*` events in every channel the bot has been invited to.
 - On startup, fetches the workspace's custom emoji list via `emoji.list`.
 - For each new top-level message in a public/private channel:
-  - **Mock branch:** rolls against the author's effective `mock_percentage` (override from `users.yaml`, else the global default). A 0.0 rate skips. On a hit, posts a threaded reply: `aLtErNaTiNg cAsE :spongebob-mock:` (or uploads `spongebob-mock.jpg` if `files:write` is granted).
+  - **Mock branch:** rolls against the author's effective `mock_percentage` (override from `users.yaml`, else the global default). A 0.0 rate skips. On a hit, takes the last 1–3 sentences of the message (count chosen at random) and posts a threaded reply: `aLtErNaTiNg cAsE :spongebob-mock:` (or uploads `spongebob-mock.jpg` if `files:write` is granted).
   - **Give-up branch:** only fires when the message ends in a `?` (ignoring trailing whitespace). Rolls against the author's effective `giveup_percentage`. A 0.0 rate skips. On a hit, uploads `just-give-up.jpg` as a threaded reply. Silently disabled if `files:write` or the image file is missing.
   - **Reaction branch:** rolls against the author's effective `reaction_percentage`. A 0.0 rate skips. On a hit, picks one custom emoji at random and adds it as a reaction.
 - Skips DMs/group DMs, edits, joins, other message subtypes, and anything with a `bot_id` (catches messages from other installed apps and our own posts). Swallows `already_reacted` from Slack.
