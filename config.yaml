@@ -1,5 +1,5 @@
 reaction_percentage: 0.25
 mock_percentage: 0.25
-# Share of messages containing a "?" to reply to with just-give-up.jpg.
+# Share of messages ending in "?" to reply to with just-give-up.jpg.
 # Requires the files:write scope and just-give-up.jpg next to the bot.
 giveup_percentage: 0.25

@@ -3,7 +3,7 @@
 # percentage field is optional; omit one to fall back to the global default.
 # Use 0.0 to opt a user out of that behavior.
 #
-# giveup_percentage only takes effect on messages containing a "?", and only
+# giveup_percentage only takes effect on messages ending in "?", and only
 # when the bot has the files:write scope plus just-give-up.jpg next to it.
 #
 # To find a user's member ID in Slack: click their name -> "View full profile"
@@ -15,7 +15,7 @@ users:
   U0123456789:
     name: Example Target
     reaction_percentage: 1.0
-    giveup_percentage: 1.0  # always send just-give-up.jpg on "?" messages
+    giveup_percentage: 1.0  # always send just-give-up.jpg on messages ending in "?"
   U0987654321:
     name: Example Friend
     mock_percentage: 0.0

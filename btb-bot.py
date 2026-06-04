@@ -326,9 +326,9 @@ def main() -> None:
             log.debug(
                 "skip-giveup ts=%s channel=%s user=%s: rate=0", ts, channel_id, user
             )
-        elif "?" not in text:
+        elif not text.rstrip().endswith("?"):
             log.debug(
-                "skip-giveup ts=%s channel=%s user=%s: no '?' in text",
+                "skip-giveup ts=%s channel=%s user=%s: does not end in '?'",
                 ts,
                 channel_id,
                 user,
